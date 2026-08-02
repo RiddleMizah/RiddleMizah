@@ -1,0 +1,84 @@
+name: Build R2-D2 v3.1 Kid UI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Restore source and verify archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat r2d2-v3-1-small/part?? | base64 --decode > /tmp/r2d2-v31.tar.xz
+          echo 'abf1b69acecd1d898f0a1e6aac7bd70cffd3b36730835eced2859ea263b2ce0c  /tmp/r2d2-v31.tar.xz' | sha256sum -c -
+          xz --test /tmp/r2d2-v31.tar.xz
+          tar -xJf /tmp/r2d2-v31.tar.xz
+          test -f R2D2-Controller-Android/app/build.gradle
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('R2D2-Controller-Android/app/build.gradle')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('release { minifyEnabled false; signingConfig signingConfigs.release }', 'release { minifyEnabled false }')
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Install Android API 35
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
+
+      - name: Build unsigned release APK
+        working-directory: R2D2-Controller-Android
+        shell: bash
+        run: gradle --no-daemon clean assembleRelease
+
+      - name: Verify package and package build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find R2D2-Controller-Android/app/build/outputs/apk/release -type f -name '*.apk' | head -n 1)"
+          test -s "$APK"
+          cp "$APK" Cams-R2D2-Controller-v3.1.0-Kid-Friendly-unsigned.apk
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee APK_BADGING.txt
+          grep -q "package: name='com.riddle.r2d2controller' versionCode='310' versionName='3.1.0'" APK_BADGING.txt
+          grep -q "targetSdkVersion:'35'" APK_BADGING.txt
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" apksigner.jar
+          sha256sum Cams-R2D2-Controller-v3.1.0-Kid-Friendly-unsigned.apk apksigner.jar > BUILD_SHA256SUMS.txt
+
+      - name: Upload unsigned verified build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cams-R2D2-v3.1-Kid-UI-unsigned
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            Cams-R2D2-Controller-v3.1.0-Kid-Friendly-unsigned.apk
+            apksigner.jar
+            APK_BADGING.txt
+            BUILD_SHA256SUMS.txt
