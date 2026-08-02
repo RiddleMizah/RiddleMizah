@@ -5,6 +5,7 @@ on:
     branches: [r2d2-v3-build]
     paths:
       - '.github/workflows/r2d2-v3-build.yml'
+      - 'r2d2-v3/**'
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -42,6 +43,7 @@ jobs:
           xz --test /tmp/r2d2-v3.tar.xz
           tar -xJf /tmp/r2d2-v3.tar.xz
           test -f R2D2-Controller-Android/app/build.gradle
+          python3 r2d2-v3/fix-mainactivity.py
 
       - name: Install Android API 35
         shell: bash
