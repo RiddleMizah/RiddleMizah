@@ -1,0 +1,118 @@
+name: Build R2-D2 Command Center v3
+
+on:
+  push:
+    branches: [r2d2-v3-build]
+    paths:
+      - '.github/workflows/r2d2-v3-build.yml'
+      - 'r2d2-v3/**'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Restore R2-D2 v3 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat r2d2-v3/xz.part?? | base64 --decode > /tmp/r2d2-v3.tar.xz
+          xz --test /tmp/r2d2-v3.tar.xz
+          tar -xJf /tmp/r2d2-v3.tar.xz
+          test -f R2D2-Controller-Android/app/build.gradle
+          python3 r2d2-v3/fix-mainactivity.py
+
+      - name: Install Android API 35
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
+
+      - name: Create persistent v3 signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          STORE_PASS="$(openssl rand -hex 18)"
+          KEY_PASS="$STORE_PASS"
+          keytool -genkeypair -v \
+            -keystore R2D2-Controller-Android/v3-release.jks \
+            -storepass "$STORE_PASS" \
+            -keypass "$KEY_PASS" \
+            -alias r2d2v3 \
+            -keyalg RSA -keysize 3072 -validity 10000 \
+            -dname 'CN=R2-D2 Command Center v3,OU=Android,O=RiddleMizah,L=Maryville,ST=Tennessee,C=US'
+          printf 'R2D2_STORE_PASSWORD=%s\nR2D2_KEY_PASSWORD=%s\nR2D2_KEY_ALIAS=r2d2v3\n' "$STORE_PASS" "$KEY_PASS" > R2D2-Controller-Android/SIGNING_INFO.txt
+          echo "STORE_PASS=$STORE_PASS" >> "$GITHUB_ENV"
+          echo "KEY_PASS=$KEY_PASS" >> "$GITHUB_ENV"
+
+      - name: Build signed release APK
+        working-directory: R2D2-Controller-Android
+        shell: bash
+        run: |
+          gradle --no-daemon \
+            -PR2D2_STORE_PASSWORD="$STORE_PASS" \
+            -PR2D2_KEY_PASSWORD="$KEY_PASS" \
+            -PR2D2_KEY_ALIAS=r2d2v3 \
+            clean assembleRelease
+
+      - name: Verify APK package, SDK, and signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK='R2D2-Controller-Android/app/build/outputs/apk/release/app-release.apk'
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" | tee R2D2-Controller-Android/APK_SIGNATURE.txt
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee R2D2-Controller-Android/APK_BADGING.txt
+          grep -q "package: name='com.riddle.r2d2controller' versionCode='300' versionName='3.0.0'" R2D2-Controller-Android/APK_BADGING.txt
+          grep -q "targetSdkVersion:'35'" R2D2-Controller-Android/APK_BADGING.txt
+
+      - name: Package install and future-update bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp R2D2-Controller-Android/app/build/outputs/apk/release/app-release.apk Cams-R2D2-Command-Center-v3.0.0.apk
+          cat > R2D2-Controller-Android/INSTALL-NOTE.txt <<'EOF'
+          Package: com.riddle.r2d2controller
+          Version: 3.0.0 (300)
+
+          The old v2 signing private key was not retained. Android may therefore require one uninstall of v2 before installing v3. Keep this source-and-signing bundle private and safe: it contains the v3 signing key needed for all seamless future v3 updates.
+          EOF
+          zip -qr Cams-R2D2-Command-Center-v3.0.0-Source-and-Signing.zip R2D2-Controller-Android \
+            -x 'R2D2-Controller-Android/app/build/*' 'R2D2-Controller-Android/.gradle/*' 'R2D2-Controller-Android/releases/*'
+          sha256sum Cams-R2D2-Command-Center-v3.0.0.apk Cams-R2D2-Command-Center-v3.0.0-Source-and-Signing.zip | tee SHA256SUMS.txt
+
+      - name: Upload verified build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cams-R2D2-Command-Center-v3
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            Cams-R2D2-Command-Center-v3.0.0.apk
+            Cams-R2D2-Command-Center-v3.0.0-Source-and-Signing.zip
+            SHA256SUMS.txt
+            R2D2-Controller-Android/APK_BADGING.txt
+            R2D2-Controller-Android/APK_SIGNATURE.txt
