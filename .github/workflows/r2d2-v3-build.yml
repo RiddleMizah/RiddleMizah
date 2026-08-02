@@ -5,6 +5,8 @@ on:
     branches: [r2d2-v3-build]
     paths:
       - '.github/workflows/r2d2-v3-build.yml'
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
